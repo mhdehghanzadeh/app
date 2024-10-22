@@ -17,6 +17,7 @@ export default {
       },
       fontFamily: {
         sans: ['"Cerebri Sans"', ...defaultTheme.fontFamily.sans],
+        yekan: ['Yekan Bakh', ...defaultTheme.fontFamily.sans],
       },
     },
   },

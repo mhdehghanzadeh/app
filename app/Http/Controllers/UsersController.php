@@ -2,124 +2,157 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Contact;
+use App\Models\Role;
 use App\Models\User;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Auth;
+use App\Rules\PhoneNumber;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
-use Inertia\Response;
+use \Morilog\Jalali\Jalalian;
+use App\Traits\General;
 
 class UsersController extends Controller
 {
-    public function index(): Response
+    use General;
+
+    public function index()
     {
         return Inertia::render('Users/Index', [
             'filters' => Request::all('search', 'role', 'trashed'),
-            'users' => Auth::user()->account->users()
-                ->orderByName()
-                ->filter(Request::only('search', 'role', 'trashed'))
-                ->get()
-                ->transform(fn ($user) => [
+            'users' => User::filter(Request::only('search', 'role', 'trashed'))
+                ->orderBy('created_at', 'DESC')
+                ->whereHas('role', function ($query) {
+                    return $query->where('name', '!=', 'contact');
+                })
+                ->paginate(10)
+                ->through(fn($user) => [
+                    'username' => $user->username,
                     'id' => $user->id,
-                    'name' => $user->name,
+                    'phone' => $user->phone,
                     'email' => $user->email,
-                    'owner' => $user->owner,
-                    'photo' => $user->photo_path ? URL::route('image', ['path' => $user->photo_path, 'w' => 40, 'h' => 40, 'fit' => 'crop']) : null,
-                    'deleted_at' => $user->deleted_at,
+                    'role_id' => $user->role ? $user->role->translate : null,
+                    'active' => $user->active,
+                    'created_at' => Jalalian::forge($user->created_at)->format('H:i Y/m/d'),
+                    'deleted_at' => $user->deleted_at ? Jalalian::forge($user->deleted_at)->format('H:i Y/m/d') : null,
                 ]),
+            'page' => Request::get('page'),
         ]);
     }
 
-    public function create(): Response
+    public function create()
     {
-        return Inertia::render('Users/Create');
+        $roles = Role::orderBy('id')
+            ->get()
+            ->map
+            ->only('id', 'translate');
+
+        if (Request::get('modal') == 'true') {
+            $data = [];
+            $data['roles'] = $roles;
+            return $data;
+        }
+
+        return Inertia::render('Users/Create', [
+            'roles' => $roles,
+        ]);
     }
 
-    public function store(): RedirectResponse
+    public function store()
     {
+        Request::merge([
+            'phone' => $this->to_english_numbers(Request::get('phone')),
+        ]);
         Request::validate([
-            'first_name' => ['required', 'max:50'],
-            'last_name' => ['required', 'max:50'],
+            'username' => ['required', 'max:20', Rule::unique('users')],
+            'phone' => ['required', 'max:11', new PhoneNumber, Rule::unique('users')],
             'email' => ['required', 'max:50', 'email', Rule::unique('users')],
-            'password' => ['nullable'],
-            'owner' => ['required', 'boolean'],
-            'photo' => ['nullable', 'image'],
+            'password' => ['required'],
+            'role_id' => ['required'],
+            'active' => ['required', 'boolean'],
         ]);
 
-        Auth::user()->account->users()->create([
-            'first_name' => Request::get('first_name'),
-            'last_name' => Request::get('last_name'),
+        User::create([
+            'username' => Request::get('username'),
+            'phone' => Request::get('phone'),
             'email' => Request::get('email'),
             'password' => Request::get('password'),
-            'owner' => Request::get('owner'),
-            'photo_path' => Request::file('photo') ? Request::file('photo')->store('users') : null,
+            'role_id' => Request::get('role_id'),
+            'active' => Request::get('active'),
         ]);
 
-        return Redirect::route('users')->with('success', 'User created.');
+        return Redirect::route('users')->with('success', 'کاربر با موفقیت ثبت گردید');
     }
 
-    public function edit(User $user): Response
+    public function edit(User $user)
     {
+
+        $roles = Role::orderBy('id')
+            ->get()
+            ->map
+            ->only('id', 'translate');
+
+        $user = [
+            'id' => $user->id,
+            'username' => $user->username,
+            'phone' => $user->phone,
+            'email' => $user->email,
+            'role_id' => $user->role_id,
+            'active' => $user->active,
+            'deleted_at' => $user->deleted_at,
+        ];
+
+        if (Request::get('modal') == 'true') {
+                $data = [];
+                $data['user'] = $user;
+                $data['roles'] = $roles;
+                return $data;
+        }
+
         return Inertia::render('Users/Edit', [
-            'user' => [
-                'id' => $user->id,
-                'first_name' => $user->first_name,
-                'last_name' => $user->last_name,
-                'email' => $user->email,
-                'owner' => $user->owner,
-                'photo' => $user->photo_path ? URL::route('image', ['path' => $user->photo_path, 'w' => 60, 'h' => 60, 'fit' => 'crop']) : null,
-                'deleted_at' => $user->deleted_at,
-            ],
+            'user' => $user,
+            'roles' => $roles,
         ]);
     }
 
-    public function update(User $user): RedirectResponse
+    public function update(User $user)
     {
-        if (App::environment('demo') && $user->isDemoUser()) {
-            return Redirect::back()->with('error', 'Updating the demo user is not allowed.');
-        }
-
+        Request::merge([
+            'phone' => $this->to_english_numbers(Request::get('phone')),
+        ]);
         Request::validate([
-            'first_name' => ['required', 'max:50'],
-            'last_name' => ['required', 'max:50'],
+            'phone' => ['required', 'max:11', new PhoneNumber, Rule::unique('users')->ignore($user->id)],
             'email' => ['required', 'max:50', 'email', Rule::unique('users')->ignore($user->id)],
+            'username' => ['required', 'max:20', Rule::unique('users')->ignore($user->id)],
             'password' => ['nullable'],
-            'owner' => ['required', 'boolean'],
-            'photo' => ['nullable', 'image'],
+            'role_id' => ['required'],
+            'active' => ['required', 'boolean'],
         ]);
 
-        $user->update(Request::only('first_name', 'last_name', 'email', 'owner'));
-
-        if (Request::file('photo')) {
-            $user->update(['photo_path' => Request::file('photo')->store('users')]);
-        }
+        $user->update(Request::only('username', 'phone', 'email', 'role_id', 'active'));
 
         if (Request::get('password')) {
             $user->update(['password' => Request::get('password')]);
         }
 
-        return Redirect::back()->with('success', 'User updated.');
+        return Redirect::back()->with('success', 'کاربر با موفقیت ویرایش گردید');
     }
 
-    public function destroy(User $user): RedirectResponse
+    public function destroy(User $user)
     {
-        if (App::environment('demo') && $user->isDemoUser()) {
-            return Redirect::back()->with('error', 'Deleting the demo user is not allowed.');
-        }
-
         $user->delete();
-
-        return Redirect::back()->with('success', 'User deleted.');
+        $contact = Contact::where('user_id', $user->id);
+        $contact->delete();
+        return Redirect::back()->with('success', 'کاربر با موفقیت حذف گردید');
     }
 
-    public function restore(User $user): RedirectResponse
+    public function restore(User $user)
     {
         $user->restore();
-
-        return Redirect::back()->with('success', 'User restored.');
+        $contact = Contact::where('user_id', $user->id);
+        $contact->restore();
+        return Redirect::back()->with('success', 'کاربر با موفقیت بازیابی گردید');
     }
 }

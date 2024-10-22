@@ -23,6 +23,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->throttleApi();
 
         $middleware->replace(\Illuminate\Http\Middleware\TrustProxies::class, \App\Http\Middleware\TrustProxies::class);
+
+        $middleware->alias([
+            'checksession' => \App\Http\Middleware\CheckSession::class,
+            'checktoken' => \App\Http\Middleware\CheckToken::class,
+            'acl' => \App\Http\Middleware\ACL::class,
+            'checkprofile' => \App\Http\Middleware\CheckProfile::class,
+        ]);
+
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

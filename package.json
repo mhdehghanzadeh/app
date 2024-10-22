@@ -27,5 +27,9 @@
         "uuid": "^8.3.2",
         "vite": "^5.2.7",
         "vue": "^3.2.27"
+    },
+    "dependencies": {
+        "maplibre-gl": "^4.7.1",
+        "ziggy-js": "^2.3.1"
     }
 }

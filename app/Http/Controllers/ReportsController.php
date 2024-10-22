@@ -3,11 +3,10 @@
 namespace App\Http\Controllers;
 
 use Inertia\Inertia;
-use Inertia\Response;
 
 class ReportsController extends Controller
 {
-    public function index(): Response
+    public function index()
     {
         return Inertia::render('Reports/Index');
     }

@@ -3,12 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\HasApiTokens;
+use Cache;
 
 class User extends Authenticatable
 {
@@ -20,7 +20,9 @@ class User extends Authenticatable
      * @var array<int, string>
      */
     protected $fillable = [
-        'name',
+        'id',
+        'username',
+        'phone',
         'email',
         'password',
     ];
@@ -36,16 +38,30 @@ class User extends Authenticatable
     ];
 
     /**
-     * Get the attributes that should be cast.
+     * The attributes that should be cast.
      *
-     * @return array<string, string>
+     * @var array<string, string>
      */
-    protected function casts(): array
+    protected $casts = [
+        'active' => 'boolean',
+        'email_verified_at' => 'datetime',
+    ];
+
+    protected $appends = ['permissions'];
+
+    public function role()
     {
-        return [
-            'owner' => 'boolean',
-            'email_verified_at' => 'datetime',
-        ];
+        return $this->belongsTo(Role::class, "role_id");
+    }
+
+    public function contact()
+    {
+        return $this->belongsTo(Contact::class, "id", "user_id");
+    }
+
+    public function consultant()
+    {
+        return $this->belongsTo(Consultant::class, "id", "user_id");
     }
 
     public function resolveRouteBinding($value, $field = null)
@@ -53,55 +69,52 @@ class User extends Authenticatable
         return $this->where($field ?? 'id', $value)->withTrashed()->firstOrFail();
     }
 
-    public function account(): BelongsTo
-    {
-        return $this->belongsTo(Account::class);
-    }
-
-    public function getNameAttribute()
-    {
-        return $this->first_name.' '.$this->last_name;
-    }
 
     public function setPasswordAttribute($password)
     {
         $this->attributes['password'] = Hash::needsRehash($password) ? Hash::make($password) : $password;
     }
 
-    public function isDemoUser()
-    {
-        return $this->email === 'johndoe@example.com';
-    }
-
-    public function scopeOrderByName($query)
-    {
-        $query->orderBy('last_name')->orderBy('first_name');
-    }
-
-    public function scopeWhereRole($query, $role)
-    {
-        switch ($role) {
-            case 'user': return $query->where('owner', false);
-            case 'owner': return $query->where('owner', true);
-        }
-    }
 
     public function scopeFilter($query, array $filters)
     {
         $query->when($filters['search'] ?? null, function ($query, $search) {
             $query->where(function ($query) use ($search) {
-                $query->where('first_name', 'like', '%'.$search.'%')
-                    ->orWhere('last_name', 'like', '%'.$search.'%')
+                $query->Where('username', 'like', '%'.$search.'%')
+                    ->orWhere('phone', 'like', '%'.$search.'%')
                     ->orWhere('email', 'like', '%'.$search.'%');
             });
-        })->when($filters['role'] ?? null, function ($query, $role) {
-            $query->whereRole($role);
         })->when($filters['trashed'] ?? null, function ($query, $trashed) {
-            if ($trashed === 'with') {
+            if ($trashed) {
                 $query->withTrashed();
-            } elseif ($trashed === 'only') {
-                $query->onlyTrashed();
             }
+        })->when($filters['sort'] ?? null, function ($query, $sort) {
+            if ($sort === 'old') {
+                $query->orderBy('created_at', 'ASC');
+            } elseif ($sort === 'new') {
+                $query->orderBy('created_at', 'DESC');
+            }
+        }, function ($query) {
+            $query->orderBy('created_at', 'DESC');
         });
+    }
+
+    public function isOnline()
+    {
+        return Cache::has('user-is-online-' . $this->id);
+    }
+
+    public function getPermissionsAttribute()
+    {
+        $result = [];
+        if($this->role){
+            $permissions = $this->role->permissions;
+       
+            foreach($permissions as $item){
+                $result [] = $item->permission_info->name;
+            }
+        }
+        
+        return $result;
     }
 }
